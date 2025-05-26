@@ -18,29 +18,43 @@ func main() {
 	go validateOrders(receivedOrdersCh, validOrderCh, invalidOrderCh)
 
 	wg.Add(1)
-	go func() {
-		order := <-validOrderCh
-		fmt.Printf("Valid order received: %v\n", order)
+	go func(validOrderCh <-chan order, invalidOrderCh <-chan invalidOrder) {
+	loop:
+		for {
+			select {
+			case order, ok := <-validOrderCh:
+				if ok {
+					fmt.Printf("Valid order received: %v\n", order)
+				} else {
+					break loop
+				}
+			case order, ok := <-invalidOrderCh:
+				if ok {
+					fmt.Printf("Invalid order received: %v, error: %v\n", order.order, order.err)
+				} else {
+					break loop
+				}
+			}
+		}
 		wg.Done()
-	}()
-	go func() {
-		order := <-invalidOrderCh
-		fmt.Printf("Invalid order received: %v, error: %v\n", order.order, order.err)
-		wg.Done()
-	}()
+	}(validOrderCh, invalidOrderCh)
+
 	wg.Wait()
 }
 
-func validateOrders(in, out chan order, errCh chan invalidOrder) {
-	order := <-in
-	if order.Quantity <= 0 {
-		errCh <- invalidOrder{order: order, err: errors.New("quantity must be greater than zero")}
-	} else {
-		out <- order
+func validateOrders(in <-chan order, out chan<- order, errCh chan<- invalidOrder) {
+	for order := range in {
+		if order.Quantity <= 0 {
+			errCh <- invalidOrder{order: order, err: errors.New("quantity must be greater than zero")}
+		} else {
+			out <- order
+		}
 	}
+	close(out)
+	close(errCh)
 }
 
-func receiveOrders(out chan order) {
+func receiveOrders(out chan<- order) {
 	for _, rawOrder := range rawOrders {
 		var newOrder order
 		err := json.Unmarshal([]byte(rawOrder), &newOrder)
@@ -49,6 +63,7 @@ func receiveOrders(out chan order) {
 		}
 		out <- newOrder
 	}
+	close(out)
 }
 
 var rawOrders = []string{
